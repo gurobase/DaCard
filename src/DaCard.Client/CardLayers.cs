@@ -219,26 +219,49 @@ namespace DaCard.Client
         }
 
         private static readonly List<Material> SharedMaterials = new List<Material>();
+        private static readonly List<Renderer> ModelRenderers = new List<Renderer>();
+        private static readonly HashSet<GameObject> CheckedModels = new HashSet<GameObject>();
 
         private static readonly int LayerFoilId = Shader.PropertyToID(LayerFoil), BackFoilId = Shader.PropertyToID(BackFoil);
 
-        // The layer stack textures that some card material (ours or a copy the game made of it) still draws with
+        // The layer stack textures that some card material (ours or a copy the game made of it) still draws with.
+        // Only card models draw them, and every card model we dress is in a stack's Models: the game makes them all with
+        // ObjectsFactory.CreateItem(Async), the inspect preview too (WeaponPreview -> CreateCleanLootPrefab -> CreateItem),
+        // and its preview material copies sit on the same renderers. So the renderers under those models are enough:
+        // walking Resources.FindObjectsOfTypeAll<Renderer>() here took 250-460 ms of the main thread in a raid, every 5 s
+        // once any card was freed.
         private static HashSet<Texture> TexturesInUse()
         {
             var used = new HashSet<Texture>();
-            foreach (var renderer in Resources.FindObjectsOfTypeAll<Renderer>())
+            try
             {
-                if (renderer == null || !renderer.gameObject.activeInHierarchy)
-                    continue;
-                renderer.GetSharedMaterials(SharedMaterials);
-                foreach (var material in SharedMaterials)
-                {
-                    if (material == null || !material.HasProperty(LayerFoilId))
-                        continue;
-                    used.Add(material.GetTexture(LayerFoilId));
-                    if (material.HasProperty(BackFoilId))
-                        used.Add(material.GetTexture(BackFoilId));
-                }
+                foreach (var stack in Stacks.Values)
+                    foreach (var model in stack.Models)
+                    {
+                        // A pooled model can be listed by several stacks: read it once
+                        if (model == null || !model.activeInHierarchy || !CheckedModels.Add(model))
+                            continue;
+                        model.GetComponentsInChildren(false, ModelRenderers);
+                        foreach (var renderer in ModelRenderers)
+                        {
+                            if (renderer == null || !renderer.gameObject.activeInHierarchy)
+                                continue;
+                            renderer.GetSharedMaterials(SharedMaterials);
+                            foreach (var material in SharedMaterials)
+                            {
+                                if (material == null || !material.HasProperty(LayerFoilId))
+                                    continue;
+                                used.Add(material.GetTexture(LayerFoilId));
+                                if (material.HasProperty(BackFoilId))
+                                    used.Add(material.GetTexture(BackFoilId));
+                            }
+                        }
+                    }
+            }
+            finally
+            {
+                CheckedModels.Clear();
+                ModelRenderers.Clear();
             }
             return used;
         }
