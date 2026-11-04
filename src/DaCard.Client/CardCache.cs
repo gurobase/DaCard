@@ -158,8 +158,6 @@ namespace DaCard.Client
                             if (versions.TryGetValue(card.Name, out var version))
                                 WriteCard(card.Name, version, card.Value.ToString(Formatting.None));
                     }
-                    if (missing.Count > 0)
-                        Plugin.Log.LogInfo($"{missing.Count} card(s) downloaded into the card cache");
                     Prune(index, versions);
                 }
                 catch (Exception e)
@@ -199,8 +197,6 @@ namespace DaCard.Client
             foreach (var file in Directory.GetFiles(_files))
                 if (!IsFreshTemp(file) && !keep.Contains(Path.GetFileName(file)))
                     removed += TryDelete(file) ? 1 : 0;
-            if (removed > 0)
-                Plugin.Log.LogInfo($"{removed} file(s) no card uses any more removed from the card cache");
         }
 
         private static IEnumerable<string> Urls(CardManifestEntry card)

@@ -404,7 +404,10 @@ namespace DaCard.Client
             }
 
             if (stack != null)
+            {
                 CardLayers.Apply(material, stack, _overlayProperty, _backProperty);
+                Plugin.Log.LogInfo($"Card {card.Tpl}: backProperty={_backProperty}, hasProperty={material.HasProperty(_backProperty)}, backTexture={material.GetTexture(_backProperty)?.name ?? "null"}");
+            }
             else if (material.HasProperty(_overlayProperty))
                 material.SetTexture(_overlayProperty, ClearTexture);
 
@@ -469,6 +472,7 @@ namespace DaCard.Client
         public static byte[] ImageData(string url)
         {
             var bytes = CardCache.Data(url);
+            Plugin.Log.LogInfo($"Image {url}: {bytes.Length} bytes, signature={BitConverter.ToString(bytes.Take(Math.Min(8, bytes.Length)).ToArray())}");
             if (bytes == null || bytes.Length == 0)
             {
                 Plugin.Log.LogError("No image data for " + url);

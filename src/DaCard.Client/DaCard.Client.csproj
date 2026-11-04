@@ -40,7 +40,7 @@
   </ItemGroup>
 
   <Target Name="CheckSptGameDir" BeforeTargets="ResolveAssemblyReferences">
-    <Error Condition="'$(SptGameDir)' == '' or !Exists('$(Managed)')" Text="SptGameDir must point at your SPT install (the client builds against its DLLs). Set it in Directory.Build.props.user (next to Directory.Build.props, not in git), as an environment variable, or with dotnet build -p:SptGameDir=&lt;path&gt;." />
+     <Error Condition="'$(SptGameDir)' == '' or !Exists('$(Managed)')" Text="SptGameDir must point at your SPT install (the client builds against its DLLs). Set it in Directory.Build.props.user (next to Directory.Build.props, not in git), as an environment variable, or with dotnet build -p:SptGameDir=&lt;path&gt;." />
   </Target>
 
 </Project>

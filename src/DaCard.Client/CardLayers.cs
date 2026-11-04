@@ -38,8 +38,7 @@ namespace DaCard.Client
             public bool Dirty = true;
             // Idle: its textures' GPU memory is freed (the objects stay: the game may still draw a model that uses them)
             public bool Idle;
-
-            public IEnumerable<RenderTexture> Textures => new[] { FrontColor, FrontFoil, FrontNormal, BackColor, BackFoil, BackNormal };
+            public bool AnyTextureCreated() => (FrontColor != null && FrontColor.IsCreated()) || (FrontFoil != null && FrontFoil.IsCreated()) || (FrontNormal != null && FrontNormal.IsCreated()) || (BackColor != null && BackColor.IsCreated()) || (BackFoil != null && BackFoil.IsCreated()) || (BackNormal != null && BackNormal.IsCreated());
         }
 
         private static readonly Dictionary<string, Stack> Stacks = new Dictionary<string, Stack>();
@@ -65,7 +64,6 @@ namespace DaCard.Client
                 _composite = new Material(shader) { name = "dacard_layer_composite", hideFlags = HideFlags.DontUnloadUnusedAsset };
             else if (_composite.shader == null || _composite.shader.name != shader.name || !_composite.shader.isSupported)
             {
-                Plugin.Log.LogInfo($"Card layer shader was gone ({(_composite.shader == null ? "unloaded" : _composite.shader.name)}): taken again from {model.name}");
                 _composite.shader = shader;
             }
         }
@@ -118,7 +116,6 @@ namespace DaCard.Client
                     foreach (var foil in stamp.Foils)
                         stack.Foils[foil.Key] = FoilTypes.Index(foil.Value);
                 stack.PictureFoil = stack.Foils.TryGetValue(FoilTypes.Picture, out var picture) ? picture : 0;
-                Plugin.Log.LogInfo($"Card layers {key}: front {front.Count} of {card.Front.Count}, back {back.Count} of {card.Back.Count} layer(s)");
             }
             if (!stack.Models.Contains(model))
                 stack.Models.Add(model);
@@ -165,7 +162,7 @@ namespace DaCard.Client
                 if (stack.Idle)
                 {
                     // Shown again, or something drew with it (Unity recreates a released texture when it's used): stack it again
-                    if (!shown && !stack.Textures.Any(t => t.IsCreated()))
+                    if (!shown && !stack.AnyTextureCreated())
                         continue;
                     stack.Idle = false;
                     stack.LastSeen = Time.time;
@@ -180,20 +177,31 @@ namespace DaCard.Client
 
             if (Time.time < _nextPurge)
                 return;
-            _nextPurge = Time.time + 5f;
+            _nextPurge = Time.time + 45f;
             // Unused for a while: free the GPU memory. Never destroy the textures or materials: the game can copy or pool
             // a card model without us seeing it. First check that no shown renderer still draws with its textures:
             // by texture, as the game draws with copies of our materials (the inspect preview does), which still use them.
             var live = Stacks.Values.Where(IsLive).OrderBy(s => s.LastSeen).ToList();
             var excess = live.Count - MaxLive;
             var idle = live.Where((s, i) => Time.time - s.LastSeen > (i < excess ? CrowdedReleaseSeconds : ReleaseAfterSeconds)).ToList();
-            var freed = Stacks.Values.Where(s => s.Idle).ToList();
+            var freed = Stacks.Values.Where(s => s.Idle && s.AnyTextureCreated()).ToList();
+
             if (idle.Count == 0 && freed.Count == 0)
                 return;
-            var used = TexturesInUse();
-            // Freed, but something draws with it after all: stack it again
-            foreach (var stack in freed.Where(s => used.Contains(s.FrontFoil) || used.Contains(s.BackFoil)))
+
+            var candidates = new HashSet<Texture>();
+            foreach (var stack in idle.Concat(freed))
             {
+                if (stack.FrontFoil != null) candidates.Add(stack.FrontFoil);
+                if (stack.BackFoil != null) candidates.Add(stack.BackFoil);
+            }
+
+            var used = TexturesInUse(candidates);
+
+            foreach (var stack in freed)
+            {
+                if (!used.Contains(stack.FrontFoil) && !used.Contains(stack.BackFoil)) continue;
+
                 stack.Idle = false;
                 stack.LastSeen = Time.time;
                 stack.Dirty = true;
@@ -201,6 +209,7 @@ namespace DaCard.Client
                 Build(stack);
                 Plugin.Log.LogInfo($"Card layers {stack.Key}: still drawn, stacked again");
             }
+
             foreach (var stack in idle)
             {
                 if (used.Contains(stack.FrontFoil) || used.Contains(stack.BackFoil))
@@ -208,11 +217,9 @@ namespace DaCard.Client
                     stack.LastSeen = Time.time;
                     continue;
                 }
-                foreach (var texture in stack.Textures)
-                    texture.Release();
-                foreach (var texture in stack.Texts.Values)
-                    if (texture != null)
-                        texture.Release();
+
+                ReleaseTextures(stack);
+
                 stack.Idle = true;
                 Plugin.Log.LogInfo($"Card layers {stack.Key}: unused, GPU memory freed");
             }
@@ -223,21 +230,34 @@ namespace DaCard.Client
         private static readonly int LayerFoilId = Shader.PropertyToID(LayerFoil), BackFoilId = Shader.PropertyToID(BackFoil);
 
         // The layer stack textures that some card material (ours or a copy the game made of it) still draws with
-        private static HashSet<Texture> TexturesInUse()
+        private static HashSet<Texture> TexturesInUse(HashSet<Texture> candidates)
         {
             var used = new HashSet<Texture>();
+            if (candidates.Count == 0) return used;
+
             foreach (var renderer in Resources.FindObjectsOfTypeAll<Renderer>())
             {
                 if (renderer == null || !renderer.gameObject.activeInHierarchy)
                     continue;
+
                 renderer.GetSharedMaterials(SharedMaterials);
                 foreach (var material in SharedMaterials)
                 {
                     if (material == null || !material.HasProperty(LayerFoilId))
                         continue;
-                    used.Add(material.GetTexture(LayerFoilId));
+
+                    var texture = material.GetTexture(LayerFoilId);
+                    if (texture != null && candidates.Contains(texture))
+                        used.Add(texture);
+
                     if (material.HasProperty(BackFoilId))
-                        used.Add(material.GetTexture(BackFoilId));
+                    {
+                        texture = material.GetTexture(BackFoilId);
+                        if (texture != null && candidates.Contains(texture))
+                            used.Add(texture);
+                    }
+                    if (used.Count == candidates.Count)
+                        return used;
                 }
             }
             return used;
@@ -257,15 +277,36 @@ namespace DaCard.Client
             return FallbackRoughness;
         }
 
-        // Render textures lose their contents when the graphics device resets: same objects (the materials use them), rebuilt
         private static void Restore(Stack stack)
         {
-            foreach (var texture in stack.Textures)
-                if (!texture.IsCreated())
-                {
-                    texture.Create();
-                    stack.Dirty = true;
-                }
+            RestoreTexture(stack.FrontColor, stack);
+            RestoreTexture(stack.FrontFoil, stack);
+            RestoreTexture(stack.FrontNormal, stack);
+            RestoreTexture(stack.BackColor, stack);
+            RestoreTexture(stack.BackFoil, stack);
+            RestoreTexture(stack.BackNormal, stack);
+        }
+
+        private static void RestoreTexture(RenderTexture texture, Stack stack)
+        {
+            if (texture != null && !texture.IsCreated())
+            {
+                texture.Create();
+                stack.Dirty = true;
+            }
+        }
+
+        private static void ReleaseTextures(Stack stack)
+        {
+            stack.FrontColor?.Release();
+            stack.FrontFoil?.Release();
+            stack.FrontNormal?.Release();
+            stack.BackColor?.Release();
+            stack.BackFoil?.Release();
+            stack.BackNormal?.Release();
+
+            foreach (var texture in stack.Texts.Values)
+                texture?.Release();
         }
 
         private static void Allocate(Stack stack)
@@ -475,9 +516,13 @@ namespace DaCard.Client
             var frame = CardAnimator.Frame(card.Tpl, TrackKey(side, index, map));
             if (frame != null)
                 return frame;
-            return layer.Textures != null && layer.Textures.TryGetValue(map, out var url) && url != null
-                ? CardRegistry.GetTexture(url, linear: map != LayerMaps.Albedo)
-                : null;
+
+            if (layer.Textures != null && layer.Textures.TryGetValue(map, out var url) && url != null)
+            {
+                var texture = CardRegistry.GetTexture(url, linear: map != LayerMaps.Albedo);
+                return texture;
+            }
+            return null;
         }
     }
 }

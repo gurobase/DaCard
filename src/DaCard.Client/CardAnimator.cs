@@ -234,9 +234,6 @@ namespace DaCard.Client
             {
                 cancel.Cancel();
             }
-
-            Plugin.Log.LogInfo($"Card {anim.Card.Tpl}: {string.Join(", ", tracks.Select(t => $"{t.Layer ?? t.Property} {t.Info.Frames} frames @ {t.Fps:0.#} fps"))} " +
-                               $"loaded in {Time.realtimeSinceStartup - started:0.0}s");
         }
 
         public static string FrameUrl(CardAnimationTrack track, int frame) => track.Url + frame.ToString("000") + ".png";

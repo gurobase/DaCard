@@ -169,7 +169,7 @@ public class DaCardMod(
 
         Blacklist(index.Templates.Keys.Concat(ledger.Placeholders).Select(t => new MongoId(t)).ToList());
         trading.Enable();
-        cardLoot.Configure(config, boosterPacks.Loot);
+        cardLoot.Configure(config);
         if (geek.Add(modPath))
         {
             AddTraderOffers(binderEntries.ToDictionary(b => b.Tpl, _ => config.Binders.Price), "binder");

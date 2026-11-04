@@ -186,14 +186,45 @@
         }
     }
 
+    async function importFileWithoutDialog(file)
+    {
+        let info;
+        try {
+            info = await DaApi.request('POST', '/api/import/inspect', file);
+        } catch (e) {
+            app.toast.err(`Could not read ${file.name}`, e.message);
+            return;
+        }
+
+        const replace = info.installed;
+        try {
+            const job = await DaApi.post(
+                `/api/import?upload=${encodeURIComponent(info.upload)}${replace ? '&replace=1' : ''}${info.name ? `&name=${encodeURIComponent(info.name)}` : ''}`
+            );
+            CCStatus.track(job, {
+                failTitle: `Could not import ${info.name || file.name}`
+            });
+        } catch (e) {
+            app.toast.err(`Could not import ${file.name}`, e.message);
+        }
+    }
+
     function init(deps) {
         app = deps;
         $('#coll-create').addEventListener('click', () => app.openCollection(null));
         $('#coll-import').addEventListener('click', () => $('#coll-file').click());
-        $('#coll-file').addEventListener('change', (e) => {
-            const file = e.target.files && e.target.files[0];
+        $('#coll-file').addEventListener('change', async (e) => {
+            const files = e.target.files;
             e.target.value = '';
-            importFile(file);
+            if (files.length === 1)
+            {
+                await importFile(files[0]);
+                return;
+            }
+            for (const file of files)
+            {
+                await importFileWithoutDialog(file);
+            }
         });
         const pane = $('#pane-collections');
         pane.addEventListener('dragover', (e) => { e.preventDefault(); });
